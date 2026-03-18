@@ -195,6 +195,25 @@ class Settings(BaseSettings):
         ge=1,
         le=200,
     )
+
+    # TTS (text-to-speech) settings
+    tts_enabled: bool = Field(
+        False, description="Enable text-to-speech for responses"
+    )
+    tts_provider: Literal["minimax"] = Field(
+        "minimax", description="TTS provider"
+    )
+    tts_model: str = Field(
+        "speech-2.8-hd", description="MiniMax TTS model"
+    )
+    tts_voice_id: str = Field(
+        "English_Graceful_Lady",
+        description="MiniMax voice ID for TTS output",
+    )
+    minimax_api_key: Optional[SecretStr] = Field(
+        None, description="MiniMax API key for TTS"
+    )
+
     enable_quick_actions: bool = Field(True, description="Enable quick action buttons")
     agentic_mode: bool = Field(
         True,
@@ -495,6 +514,13 @@ class Settings(BaseSettings):
     def openai_api_key_str(self) -> Optional[str]:
         """Get OpenAI API key as string."""
         return self.openai_api_key.get_secret_value() if self.openai_api_key else None
+
+    @property
+    def minimax_api_key_str(self) -> Optional[str]:
+        """Get MiniMax API key as string."""
+        return (
+            self.minimax_api_key.get_secret_value() if self.minimax_api_key else None
+        )
 
     @property
     def resolved_voice_model(self) -> str:
