@@ -1,5 +1,8 @@
 """Handle voice message transcription via Mistral (Voxtral) or OpenAI (Whisper)."""
 
+import asyncio
+import json
+import urllib.request
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Optional
@@ -187,3 +190,86 @@ class VoiceHandler:
 
         self._openai_client = AsyncOpenAI(api_key=api_key)
         return self._openai_client
+
+
+class TTSHandler:
+    """Convert text to speech using MiniMax TTS API."""
+
+    TTS_ENDPOINT = "https://api.minimaxi.com/v1/t2a_v2"
+    MAX_CHARS = 10_000
+
+    def __init__(self, config: Settings):
+        self.config = config
+
+    async def synthesize(self, text: str) -> Optional[bytes]:
+        """Convert text to MP3 bytes. Returns None on failure."""
+        api_key = self.config.minimax_api_key_str
+        if not api_key:
+            logger.warning("TTS skipped: no MiniMax API key")
+            return None
+
+        # Strip HTML tags and trim to limit
+        import re
+
+        clean = re.sub(r"<[^>]+>", "", text).strip()
+        if not clean:
+            return None
+        if len(clean) > self.MAX_CHARS:
+            clean = clean[: self.MAX_CHARS]
+
+        payload = json.dumps(
+            {
+                "model": self.config.tts_model,
+                "text": clean,
+                "stream": False,
+                "voice_setting": {
+                    "voice_id": self.config.tts_voice_id,
+                    "speed": 1.0,
+                    "vol": 1.0,
+                    "pitch": 0,
+                },
+                "audio_setting": {
+                    "sample_rate": 32000,
+                    "bitrate": 128000,
+                    "format": "mp3",
+                    "channel": 1,
+                },
+                "output_format": "hex",
+            }
+        ).encode()
+
+        req = urllib.request.Request(
+            self.TTS_ENDPOINT,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            loop = asyncio.get_running_loop()
+            resp_bytes = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(req, timeout=30).read()
+            )
+            resp = json.loads(resp_bytes)
+        except Exception as exc:
+            logger.warning("TTS API request failed", error=str(exc))
+            return None
+
+        status_code = resp.get("base_resp", {}).get("status_code", -1)
+        if status_code != 0:
+            logger.warning(
+                "TTS API error",
+                status_code=status_code,
+                status_msg=resp.get("base_resp", {}).get("status_msg"),
+            )
+            return None
+
+        hex_audio = resp.get("data", {}).get("audio", "")
+        if not hex_audio:
+            logger.warning("TTS returned empty audio")
+            return None
+
+        return bytes.fromhex(hex_audio)
