@@ -3,10 +3,15 @@
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Remove CLAUDECODE env var to prevent "nested session" detection
+# when the bot spawns Claude Code subprocesses.
+os.environ.pop("CLAUDECODE", None)
 
 import structlog
 

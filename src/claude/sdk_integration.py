@@ -194,6 +194,10 @@ class ClaudeSDKManager:
                 sdk_allowed_tools = self.config.claude_allowed_tools
                 sdk_disallowed_tools = self.config.claude_disallowed_tools
 
+            # Build a clean environment without CLAUDECODE to avoid
+            # "nested session" detection when running inside Claude Code.
+            clean_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
             # Build Claude Agent options
             options = ClaudeAgentOptions(
                 max_turns=self.config.claude_max_turns,
@@ -204,6 +208,7 @@ class ClaudeSDKManager:
                 disallowed_tools=sdk_disallowed_tools,
                 cli_path=self.config.claude_cli_path or None,
                 include_partial_messages=stream_callback is not None,
+                permission_mode="acceptEdits",
                 sandbox={
                     "enabled": self.config.sandbox_enabled,
                     "autoAllowBashIfSandboxed": True,
@@ -212,6 +217,7 @@ class ClaudeSDKManager:
                 system_prompt=base_prompt,
                 setting_sources=["project"],
                 stderr=_stderr_callback,
+                env=clean_env,
             )
 
             # Pass MCP server configuration if enabled
