@@ -308,6 +308,7 @@ class MessageOrchestrator:
             ("verbose", self.agentic_verbose),
             ("repo", self.agentic_repo),
             ("restart", command.restart_command),
+            ("voice", self.agentic_voice_toggle),
         ]
         if self.settings.enable_project_threads:
             handlers.append(("sync_threads", command.sync_threads))
@@ -417,6 +418,7 @@ class MessageOrchestrator:
                 BotCommand("verbose", "Set output verbosity (0/1/2)"),
                 BotCommand("repo", "List repos / switch workspace"),
                 BotCommand("restart", "Restart the bot"),
+                BotCommand("voice", "Toggle voice responses on/off"),
             ]
             if self.settings.enable_project_threads:
                 commands.append(BotCommand("sync_threads", "Sync project topics"))
@@ -577,6 +579,42 @@ class MessageOrchestrator:
             f"Verbosity set to <b>{level}</b> ({labels[level]})",
             parse_mode="HTML",
         )
+
+    async def agentic_voice_toggle(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Toggle always-on TTS: /voice."""
+        current = context.user_data.get("tts_always_on", False)
+        context.user_data["tts_always_on"] = not current
+        state = "ON" if not current else "OFF"
+        await update.message.reply_text(f"Voice responses: <b>{state}</b>", parse_mode="HTML")
+
+    async def _maybe_send_tts(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        formatted_messages: list,
+    ) -> None:
+        """Send a voice message if TTS is active."""
+        features = context.bot_data.get("features")
+        tts_handler = features.get_tts_handler() if features else None
+        if not tts_handler:
+            return
+
+        # Combine all message texts
+        full_text = "\n".join(
+            m.text for m in formatted_messages if m.text and m.text.strip()
+        )
+        if not full_text.strip():
+            return
+
+        try:
+            audio_bytes = await tts_handler.synthesize(full_text)
+            if audio_bytes:
+                import io
+                await update.message.reply_voice(voice=io.BytesIO(audio_bytes))
+        except Exception as exc:
+            logger.warning("TTS send failed", error=str(exc))
 
     def _format_verbose_progress(
         self,
@@ -1080,6 +1118,10 @@ class MessageOrchestrator:
                 success=success,
             )
 
+        # Send TTS if always-on toggle is active
+        if context.user_data.get("tts_always_on"):
+            await self._maybe_send_tts(update, context, formatted_messages)
+
     async def agentic_document(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -1329,6 +1371,7 @@ class MessageOrchestrator:
                 progress_msg=progress_msg,
                 user_id=user_id,
                 chat=chat,
+                send_tts=True,
             )
 
         except Exception as e:
@@ -1348,6 +1391,7 @@ class MessageOrchestrator:
         progress_msg: Any,
         user_id: int,
         chat: Any,
+        send_tts: bool = False,
     ) -> None:
         """Run a media-derived prompt through Claude and send responses."""
         claude_integration = context.bot_data.get("claude_integration")
@@ -1449,6 +1493,10 @@ class MessageOrchestrator:
                     )
                 except Exception as img_err:
                     logger.warning("Image send failed", error=str(img_err))
+
+        # Send TTS voice response if requested
+        if send_tts:
+            await self._maybe_send_tts(update, context, formatted_messages)
 
     def _voice_unavailable_message(self) -> str:
         """Return provider-aware guidance when voice feature is unavailable."""
